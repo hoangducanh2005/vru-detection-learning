@@ -30,6 +30,11 @@ def main() -> None:
     parser.add_argument("--top-k", type=int)
     parser.add_argument("--score-threshold", type=float)
     parser.add_argument("--output", type=Path)
+    parser.add_argument(
+        "--json-output",
+        type=Path,
+        help="File JSON; mac dinh artifacts/demo_<index>.json",
+    )
     args = parser.parse_args()
     config = load_config()
     data_cfg, model_cfg, infer_cfg = config["data"], config["model"], config["inference"]
@@ -71,16 +76,24 @@ def main() -> None:
         suffix = f" {record['status']}" if "status" in record else ""
         texts.append(f"{record['class']} {float(score):.2f} {distance:.1f}m{suffix}")
 
-    # KHỐI 4: Xuất cả JSON-readable records và ảnh trực quan.
+    # KHỐI 4: Xuất cả JSON machine-readable và ảnh trực quan.
     boxes_np = detection["boxes"].cpu().numpy()
     labels_np = detection["labels"].cpu().numpy()
     image = resized_bgr(sample["meta"]["camera_path"], image_size)
     rendered = draw_boxes(image, boxes_np, labels_np, texts)
     output = args.output or Path(f"artifacts/demo_{args.sample_index:03d}.jpg")
+    json_output = args.json_output or Path(f"artifacts/demo_{args.sample_index:03d}.json")
     output.parent.mkdir(parents=True, exist_ok=True)
+    json_output.parent.mkdir(parents=True, exist_ok=True)
     cv2.imwrite(str(output), rendered)
-    print(json.dumps({"token": sample["meta"]["token"], "objects": records}, indent=2))
-    print(f"saved {output}")
+    result_payload = {
+        "sample_index": args.sample_index,
+        "token": sample["meta"]["token"],
+        "objects": records,
+    }
+    json_output.write_text(json.dumps(result_payload, indent=2), encoding="utf-8")
+    print(json.dumps(result_payload, indent=2))
+    print(f"saved {output} and {json_output}")
 
 
 if __name__ == "__main__":

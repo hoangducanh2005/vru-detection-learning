@@ -19,7 +19,11 @@ input_000.jpg                     ảnh camera gốc 1920x1080
     |
     +-- phase1_detection_000.jpg  output detector ở 768x432
     |
+    +-- phase1_detection_000.json class + bbox + confidence
+    |
     +-- demo_000.jpg              detection + depth + VRU risk ở 768x432
+    |
+    +-- demo_000.json             kết quả đầy đủ để chương trình khác đọc
 ```
 
 `valid_samples.json` là index metadata cho Dataset, không phải một ảnh output.
@@ -31,3 +35,15 @@ python scripts/generate_artifacts.py --sample-index 0
 ```
 
 Hai output model chỉ là smoke-test sau vài iteration, chưa đại diện accuracy.
+
+Mỗi phần tử trong `demo_000.json` có dạng:
+
+```json
+{
+  "class": "VRU",
+  "bbox": [230.73, 242.1, 235.85, 247.78],
+  "confidence": 0.0276,
+  "distance_m": 39.08,
+  "status": "FAR"
+}
+```

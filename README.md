@@ -140,7 +140,9 @@ input_000.jpg
     ├── projected_gt_000.jpg       3D GT box -> bbox 2D
     ├── sparse_depth_000.jpg       LiDAR -> camera depth overlay
     ├── phase1_detection_000.jpg   detector prediction
-    └── demo_000.jpg               detection + depth + VRU risk
+    ├── phase1_detection_000.json  class + bbox + confidence
+    ├── demo_000.jpg               detection + depth + VRU risk
+    └── demo_000.json              kết quả đầy đủ dạng machine-readable
 ```
 
 `input_000.jpg` giữ resolution gốc 1920×1080. Hai output model được resize về
@@ -152,6 +154,18 @@ python scripts/generate_artifacts.py --sample-index 0
 
 Script truyền cùng một `sample-index` cho mọi stage, tránh vô tình so sánh output
 từ các cảnh khác nhau.
+
+`demo_000.json` lưu từng object theo dạng:
+
+```json
+{
+  "class": "VRU",
+  "bbox": [230.73, 242.1, 235.85, 247.78],
+  "confidence": 0.0276,
+  "distance_m": 39.08,
+  "status": "FAR"
+}
+```
 
 ## Dataset và CenterNet targets
 
