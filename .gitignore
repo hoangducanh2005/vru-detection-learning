@@ -1,0 +1,8 @@
+__pycache__/
+.pytest_cache/
+*.py[cod]
+.venv/
+
+# Generated training outputs.  Keep the small JSON index and sanity images if desired.
+checkpoints/*.pt
+

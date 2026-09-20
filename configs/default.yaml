@@ -1,0 +1,26 @@
+data:
+  index_path: artifacts/valid_samples.json
+  image_width: 768
+  image_height: 432
+  output_stride: 4
+  max_samples: null
+
+model:
+  fpn_channels: 128
+  pretrained_backbone: false
+  num_classes: 2
+  depth_bins: 64
+  depth_min_m: 1.0
+  depth_max_m: 80.0
+
+loss:
+  lambda_offset: 1.0
+  lambda_size: 0.1
+  lambda_depth: 1.0
+
+inference:
+  top_k: 100
+  score_threshold: 0.25
+  critical_distance_m: 10.0
+  near_distance_m: 20.0
+

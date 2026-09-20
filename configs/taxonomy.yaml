@@ -1,0 +1,15 @@
+# Mapping observed in the local NAVSIM mini logs on 2026-09-21.
+# VRU is a semantic ground-truth category, never a box-size heuristic.
+classes:
+  VEHICLE: 0
+  VRU: 1
+
+mapping:
+  vehicle: VEHICLE
+  pedestrian: VRU
+  bicycle: VRU
+  generic_object: IGNORE
+  traffic_cone: IGNORE
+  barrier: IGNORE
+  czone_sign: IGNORE
+

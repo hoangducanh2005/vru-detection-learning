@@ -1,0 +1,63 @@
+"""Nạp checkpoint Phase 1, decode một frame NAVSIM và vẽ detection."""
+
+from __future__ import annotations
+
+import argparse
+from pathlib import Path
+
+import cv2
+import numpy as np
+import torch
+
+import _bootstrap  # noqa: F401
+from _common import choose_device, load_config, load_model_state, resized_bgr
+from src.data.navsim_vru_dataset import NavsimVruDataset
+from src.model.vru_model import VruModel
+from src.utils.decode import decode_detections
+from src.utils.visualization import CLASS_NAMES, draw_boxes
+
+
+def main() -> None:
+    # KHỐI 1: Lazy-load một frame và khôi phục đúng model Phase 1.
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--index", default="artifacts/valid_samples.json")
+    parser.add_argument("--checkpoint", type=Path, default=Path("checkpoints/phase1_detector.pt"))
+    parser.add_argument("--sample-index", type=int, default=0)
+    parser.add_argument("--device", default="auto")
+    parser.add_argument("--top-k", type=int)
+    parser.add_argument("--score-threshold", type=float)
+    parser.add_argument("--output", type=Path)
+    args = parser.parse_args()
+    config = load_config()
+    data_cfg, model_cfg, infer_cfg = config["data"], config["model"], config["inference"]
+    image_size = (data_cfg["image_width"], data_cfg["image_height"])
+    dataset = NavsimVruDataset(args.index, image_size, data_cfg["output_stride"])
+    sample = dataset[args.sample_index]
+    device = choose_device(args.device)
+    model = VruModel(model_cfg["fpn_channels"]).to(device)
+    load_model_state(model, args.checkpoint)
+    model.eval()
+    # KHỐI 2: inference_mode tắt gradient để tiết kiệm RAM và thời gian.
+    with torch.inference_mode():
+        outputs = model(sample["image"].unsqueeze(0).to(device))
+        detections = decode_detections(
+            outputs["heatmap"], outputs["offset"], outputs["size"],
+            data_cfg["output_stride"], args.top_k or infer_cfg["top_k"],
+            args.score_threshold if args.score_threshold is not None else infer_cfg["score_threshold"],
+            image_size,
+        )[0]
+    # KHỐI 3: Đổi tensor sang OpenCV image và lưu artifact để kiểm tra trực quan.
+    boxes = detections["boxes"].cpu().numpy()
+    scores = detections["scores"].cpu().numpy()
+    labels = detections["labels"].cpu().numpy()
+    texts = [f"{CLASS_NAMES[int(label)]} {score:.2f}" for label, score in zip(labels, scores)]
+    image = resized_bgr(sample["meta"]["camera_path"], image_size)
+    rendered = draw_boxes(image, boxes, labels, texts)
+    output = args.output or Path(f"artifacts/phase1_detection_{args.sample_index:03d}.jpg")
+    output.parent.mkdir(parents=True, exist_ok=True)
+    cv2.imwrite(str(output), rendered)
+    print(f"saved {output}; detections={len(boxes)}")
+
+
+if __name__ == "__main__":
+    main()
