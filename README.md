@@ -125,6 +125,34 @@ python scripts/visualize_sparse_depth.py --sample-index 0
 
 Kết quả local ở sample 0 có 21.022 LiDAR point trong ảnh và camera-Z dương khoảng 3,03–70,70 m. Nếu point/box không bám cảnh, không nên training; hãy sửa calibration/convention trước.
 
+### Một input duy nhất cho toàn bộ artifacts
+
+Các ảnh minh họa trong `artifacts/` đều xuất phát từ **cùng một ảnh camera trước**:
+
+```text
+sample-index: 0
+NAVSIM token: 322cc2787c5d59c0
+input: artifacts/input_000.jpg
+```
+
+```text
+input_000.jpg
+    ├── projected_gt_000.jpg       3D GT box -> bbox 2D
+    ├── sparse_depth_000.jpg       LiDAR -> camera depth overlay
+    ├── phase1_detection_000.jpg   detector prediction
+    └── demo_000.jpg               detection + depth + VRU risk
+```
+
+`input_000.jpg` giữ resolution gốc 1920×1080. Hai output model được resize về
+768×432 theo config, nhưng nội dung vẫn là đúng frame đó. Sinh lại toàn bộ bằng:
+
+```powershell
+python scripts/generate_artifacts.py --sample-index 0
+```
+
+Script truyền cùng một `sample-index` cho mọi stage, tránh vô tình so sánh output
+từ các cảnh khác nhau.
+
 ## Dataset và CenterNet targets
 
 Ảnh 1920×1080 được resize thành 768×432 bằng `INTER_AREA`. Box được scale bởi `sx, sy`. Nếu dùng intrinsic sau resize, `fx,cx` nhân `sx`, còn `fy,cy` nhân `sy` (`scale_intrinsic`).
