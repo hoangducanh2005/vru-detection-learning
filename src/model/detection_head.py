@@ -28,7 +28,7 @@ class DetectionHead(nn.Module):
         nn.init.constant_(self.heatmap[-1].bias, -math.log((1.0 - 0.01) / 0.01))
 
     def forward(self, feature: torch.Tensor) -> dict[str, torch.Tensor]:
-        # Ba nhánh độc lập giúp người học nhìn rõ nhiệm vụ của từng tensor.
+        # Ba nhánh độc lập, nhìn rõ nhiệm vụ của từng tensor.
         return {
             "heatmap": self.heatmap(feature),  # [B,2,H/4,W/4], logits
             "offset": self.offset(feature),  # [B,2,H/4,W/4]

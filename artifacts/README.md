@@ -34,8 +34,6 @@ Sinh lại toàn bộ artifact từ input trên:
 python scripts/generate_artifacts.py --sample-index 0
 ```
 
-Hai output model chỉ là smoke-test sau vài iteration, chưa đại diện accuracy.
-
 Mỗi phần tử trong `demo_000.json` có dạng:
 
 ```json
