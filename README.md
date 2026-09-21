@@ -1,6 +1,5 @@
 # NAVSIM Vehicle / VRU Detection + Metric Depth
 
-Project PyTorch nhỏ để học pipeline perception từ một ảnh camera trước.
 
 Input là current frame của NAVSIM. Output gồm:
 
@@ -9,7 +8,14 @@ Input là current frame của NAVSIM. Output gồm:
 - khoảng cách object;
 - trạng thái `CRITICAL / NEAR / FAR` cho VRU.
 
-Đây là project học tập, không phải hệ thống an toàn để sử dụng trên xe thật.
+
+## CODE chính 
+[src/model/vru_model.py]
+Image
+  → ResNet34 backbone
+  → FPN
+  → Detection Head
+  → heatmap / offset / size
 
 ## Kiến trúc
 
@@ -53,7 +59,7 @@ Detection Head       Depth Head
 
 ## Dữ liệu và taxonomy
 
-Project chỉ dùng `CAM_F0`, current LiDAR và current annotations.
+Cam trước , current LiDAR và current annotations.
 
 ```text
 vehicle              -> VEHICLE = 0
@@ -182,5 +188,4 @@ artifacts/     input, visualization và JSON outputs
 - Checkpoint hiện tại chỉ được train vài iteration để kiểm tra pipeline.
 - Confidence và bbox trong demo chưa đại diện accuracy thực tế.
 - Depth là `camera-Z`, không phải Euclidean range 3D từ sensor.
-- Không có multi-camera fusion, BEV, 3D detector, occupancy hoặc planning.
 - Logic `CRITICAL / NEAR / FAR` chỉ để minh họa, không phải safety logic.
