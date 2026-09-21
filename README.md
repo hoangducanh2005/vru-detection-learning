@@ -1,161 +1,158 @@
-# Vehicle / VRU Detection Learning
+# NAVSIM Vehicle / VRU Detection + Metric Depth
 
-Repository PyTorch nhỏ để học luồng dữ liệu autonomous driving từ một frame NAVSIM thật đến:
+Project PyTorch nhỏ để học pipeline perception từ một ảnh camera trước.
 
-1. detector 2D hai lớp `VEHICLE / VRU`;
-2. depth camera-Z theo mét, giám sát thưa bằng LiDAR;
-3. khoảng cách object và nhãn demo `CRITICAL / NEAR / FAR` cho VRU.
+Input là current frame của NAVSIM. Output gồm:
 
-Đây là code học kiến trúc, **không phải safety-grade perception system** và không nhằm đạt SOTA.
+- bbox 2D và confidence của `VEHICLE / VRU`;
+- metric depth theo trục Z camera;
+- khoảng cách object;
+- trạng thái `CRITICAL / NEAR / FAR` cho VRU.
 
-## Pipeline
+Đây là project học tập, không phải hệ thống an toàn để sử dụng trên xe thật.
 
-Phase 1:
-
-```text
-NAVSIM raw frame (CAM_F0 + 3D annotations)
-            |
-            +-- 3D box LiDAR frame --lidar2cam + K--> 2D GT box
-            |
-        Dataset / DataLoader
-            |
-      RGB [B,3,432,768]
-            |
-         ResNet34
-     C2 / C3 / C4 / C5
-            |
-            FPN
-   feature [B,128,108,192]
-            |
-  CenterNet detection head
-   /          |          \
-heatmap     offset       size
-[B,2,h,w] [B,2,h,w]  [B,2,h,w]
-            |
-     VEHICLE / VRU + 2D box
-```
-
-Phase 2 dùng cùng feature, không thay detector:
+## Kiến trúc
 
 ```text
-                  FPN stride-4 feature
-                    /              \
-          Detection Head          Depth Head
-          box + class score      64-bin logits
-                    \              /
-                    object distance
-                           |
-                 VRU risk threshold demo
-                 CRITICAL / NEAR / FAR
+NAVSIM current frame
+    ├── CAM_F0 image
+    ├── 3D annotations
+    ├── current LiDAR
+    └── camera calibration
+              |
+              v
+      Project 3D GT -> bbox 2D
+              |
+              v
+       Dataset / DataLoader
+              |
+              v
+       RGB [B,3,432,768]
+              |
+              v
+          ResNet34
+       C2 / C3 / C4 / C5
+              |
+              v
+     FPN [B,128,108,192]
+          /           \
+         /             \
+Detection Head       Depth Head
+ heatmap [B,2,H,W]   64 depth bins
+ offset  [B,2,H,W]   sparse LiDAR supervision
+ size    [B,2,H,W]   expected metric depth
+         \             /
+          \           /
+       bbox + class + confidence
+                  +
+            object distance
+                  |
+                  v
+       VRU: CRITICAL / NEAR / FAR
 ```
 
-Không có 8-camera fusion, BEV, IPM, 3D detector, occupancy, planning hay motion prediction.
+## Dữ liệu và taxonomy
 
-## Dữ liệu local đã kiểm tra
-
-Mặc định các script đọc:
+Project chỉ dùng `CAM_F0`, current LiDAR và current annotations.
 
 ```text
-D:\navsim_workspace\dataset\navsim_logs\mini
-D:\navsim_workspace\dataset\sensor_blobs\mini
+vehicle              -> VEHICLE = 0
+pedestrian, bicycle  -> VRU = 1
+generic_object       -> IGNORE
+traffic_cone         -> IGNORE
+barrier              -> IGNORE
+czone_sign           -> IGNORE
 ```
 
-Ngày 2026-09-21, subset local có 2 log, 1.020 frame và cả 1.020 frame đều có `CAM_F0` lẫn `MergedPointCloud`. Class thực tế:
+VRU được xác định bằng ground-truth taxonomy, không dùng kích thước bbox.
 
-| NAVSIM name | Số annotation | Mapping |
-|---|---:|---|
-| `vehicle` | 21.765 | `VEHICLE` (0) |
-| `pedestrian` | 10.555 | `VRU` (1) |
-| `bicycle` | 28 | `VRU` (1) |
-| `generic_object` | 55.575 | `IGNORE` |
-| `traffic_cone` | 3.471 | `IGNORE` |
-| `barrier` | 360 | `IGNORE` |
-| `czone_sign` | 29 | `IGNORE` |
+Ảnh và LiDAR được lazy-load trong `Dataset.__getitem__()`. File
+`artifacts/valid_samples.json` chỉ chứa path, token, calibration và bbox nhỏ;
+không chứa decoded image hoặc point-cloud arrays.
 
-Chạy lại thống kê thay vì tin vào bảng:
+## Ground truth 2D
 
-```powershell
-python scripts/inspect_navsim_classes.py
-```
-
-**VRU không được xác định bằng kích thước bbox.** Khi tạo nhãn training, VRU đến từ taxonomy ground truth (`pedestrian`, `bicycle`). Model sau đó học feature thị giác tương ứng. Đây là bài toán khác với risk classification: detector trước tiên trả lời “object có phải VRU không?”, rồi logic khoảng cách mới trả lời “VRU này gần tới mức nào?”.
-
-## Phase 0: frame tọa độ và 2D GT
-
-Các convention đã được đối chiếu với NAVSIM source local:
-
-- `navsim/common/enums.py`: box là `[x, y, z, length, width, height, heading]`;
-- `navsim/common/dataclasses.py`: `anns.gt_boxes/gt_names` trở thành `Annotations.boxes/names`;
-- `navsim/visualization/camera.py`: NAVSIM nghịch đảo `sensor2lidar_rotation` khi đưa LiDAR/annotation sang camera.
-
-Metadata `sensor2lidar` có chiều **camera → LiDAR**:
+NAVSIM cung cấp bbox 3D:
 
 ```text
-p_lidar = R_camera_to_lidar @ p_camera + t_camera_to_lidar
+[x, y, z, length, width, height, heading]
 ```
 
-Ta có điểm/box trong LiDAR frame, nên cần chiều ngược lại:
+Code tạo 8 đỉnh, đổi từ LiDAR sang camera, project bằng intrinsic `K`, sau đó
+clip bbox theo kích thước ảnh.
 
 ```text
-p_camera = inverse(R_camera_to_lidar) @ (p_lidar - t_camera_to_lidar)
+3D box in LiDAR
+      -> lidar2cam
+      -> camera XYZ, giữ z > 0
+      -> intrinsic K
+      -> bbox 2D
 ```
 
-Sau đó chỉ giữ `z_camera > 0` và project bằng intrinsic `K`:
+`projected_gt_000.jpg` là ground truth lấy từ NAVSIM, không phải prediction.
+
+## Detection targets và loss
 
 ```text
-[u', v', w'] = K @ [x_camera, y_camera, z_camera]
-u = u' / w'
-v = v' / w'
+heatmap  object ở đâu và thuộc class nào
+offset   sửa sai số làm tròn tâm ở feature map stride 4
+size     width và height của bbox
+mask     cell nào được tính regression loss
 ```
-
-`src/data/projection.py` tạo 8 corner của 3D box, transform, project, lấy extent 2D, intersect và clip theo ảnh. Index được build bằng:
-
-```powershell
-python scripts/build_index.py
-python scripts/visualize_projected_gt.py --sample-index 0
-```
-
-`artifacts/valid_samples.json` chỉ chứa path, token, calibration và 2D projected labels (khoảng 3,5 MB trên subset hiện tại). Nó **không chứa decoded image hoặc LiDAR array**. `Dataset.__getitem__()` mới đọc JPEG/PCD.
-
-Visualization box và LiDAR overlay là kiểm tra quan trọng nhất cho extrinsic:
-
-```powershell
-python scripts/visualize_sparse_depth.py --sample-index 0
-```
-
-Kết quả local ở sample 0 có 21.022 LiDAR point trong ảnh và camera-Z dương khoảng 3,03–70,70 m. Nếu point/box không bám cảnh, không nên training; hãy sửa calibration/convention trước.
-
-### Một input duy nhất cho toàn bộ artifacts
-
-Các ảnh minh họa trong `artifacts/` đều xuất phát từ **cùng một ảnh camera trước**:
 
 ```text
-sample-index: 0
-NAVSIM token: 322cc2787c5d59c0
-input: artifacts/input_000.jpg
+L_detection = L_heatmap_focal
+            + lambda_offset * L_offset_L1
+            + lambda_size * L_size_L1
 ```
+
+Decode:
+
+```text
+sigmoid -> local maximum -> top-K
+        -> class + center + offset + size
+        -> bbox XYXY
+```
+
+## Depth và khoảng cách
+
+LiDAR được project lên camera để tạo sparse metric-depth target. Depth loss chỉ
+tính tại pixel có LiDAR supervision.
+
+Depth head dự đoán xác suất trên 64 depth bins:
+
+```text
+metric depth = sum(probability_i * depth_bin_center_i)
+```
+
+```text
+L_total = L_detection + lambda_depth * L_sparse_depth
+```
+
+Distance của object là median depth trong vùng lower-middle của bbox. Risk status
+chỉ áp dụng cho VRU:
+
+```text
+distance <= 10 m         -> CRITICAL
+10 m < distance <= 20 m -> NEAR
+distance > 20 m          -> FAR
+```
+
+## Output
+
+Tất cả artifact minh họa dùng cùng `input_000.jpg`:
 
 ```text
 input_000.jpg
-    ├── projected_gt_000.jpg       3D GT box -> bbox 2D
-    ├── sparse_depth_000.jpg       LiDAR -> camera depth overlay
-    ├── phase1_detection_000.jpg   detector prediction
+    ├── projected_gt_000.jpg       NAVSIM ground truth
+    ├── sparse_depth_000.jpg       LiDAR depth overlay
+    ├── phase1_detection_000.jpg   detection output
     ├── phase1_detection_000.json  class + bbox + confidence
-    ├── demo_000.jpg               detection + depth + VRU risk
-    └── demo_000.json              kết quả đầy đủ dạng machine-readable
+    ├── demo_000.jpg               detection + depth + risk
+    └── demo_000.json              kết quả đầy đủ
 ```
 
-`input_000.jpg` giữ resolution gốc 1920×1080. Hai output model được resize về
-768×432 theo config, nhưng nội dung vẫn là đúng frame đó. Sinh lại toàn bộ bằng:
-
-```powershell
-python scripts/generate_artifacts.py --sample-index 0
-```
-
-Script truyền cùng một `sample-index` cho mọi stage, tránh vô tình so sánh output
-từ các cảnh khác nhau.
-
-`demo_000.json` lưu từng object theo dạng:
+Một object trong `demo_000.json`:
 
 ```json
 {
@@ -167,156 +164,23 @@ từ các cảnh khác nhau.
 }
 ```
 
-## Dataset và CenterNet targets
-
-Ảnh 1920×1080 được resize thành 768×432 bằng `INTER_AREA`. Box được scale bởi `sx, sy`. Nếu dùng intrinsic sau resize, `fx,cx` nhân `sx`, còn `fy,cy` nhân `sy` (`scale_intrinsic`).
-
-Mỗi sample trả:
-
-```python
-{
-    "image": Tensor[3, 432, 768],
-    "targets": {
-        "heatmap": Tensor[2, 108, 192],
-        "offset": Tensor[2, 108, 192],
-        "size": Tensor[2, 108, 192],
-        "mask": Tensor[1, 108, 192],
-    },
-    "raw_boxes": Tensor[N, 4],
-    "raw_labels": Tensor[N],
-    "meta": {"token": ..., "camera_path": ...},
-}
-```
-
-Ý nghĩa target:
-
-- **heatmap**: tâm object ở đâu và thuộc lớp nào; Gaussian quanh tâm giúp supervision bớt quá “mỏng”;
-- **offset**: tâm thật thường nằm giữa hai cell stride-4, nên head học phần lẻ để sửa quantization;
-- **size**: width/height của bbox theo đơn vị feature-map;
-- **mask**: L1 chỉ tính đúng tại cell tâm object.
-
-Loss:
-
-```text
-L_det = L_heatmap_focal + lambda_offset * L_offset_L1
-                          + lambda_size * L_size_L1
-```
-
-Decode làm `sigmoid → local max 3x3 → top-K → class/center → offset/size → XYXY`. Local maximum đóng vai trò suppression đơn giản; repo không thêm một NMS phức tạp.
-
-## Backbone và FPN là gì?
-
-**Backbone** ResNet34 biến pixel thành feature ngày càng giàu ngữ nghĩa. `C2` có độ phân giải cao, còn `C5` có receptive field lớn nhưng thô.
-
-**FPN** dùng lateral 1×1 conv để đưa C2–C5 về 128 channel, rồi upsample và cộng từ C5 xuống C2. Output stride-4 vì VRU nhỏ cần spatial detail, nhưng vẫn nhận semantic context từ tầng sâu. Version đầu chỉ detect ở một scale stride-4 để code dễ theo dõi; multi-scale detection là một hướng mở rộng, không nằm trong scope hiện tại.
-
-## Sparse metric depth
-
-`src/data/depth_projection.py` đọc PCD ở `__getitem__`, transform LiDAR → camera bằng đúng extrinsic trên, giữ `z_camera > 0`, project bằng `K` và giữ return gần nhất khi nhiều point rơi vào cùng pixel stride-4.
-
-Depth head không nói trực tiếp “17,3 m”. Với 64 bin trong 1–80 m, nó tạo probability distribution, ví dụ:
-
-```text
-10 m: 0.05
-15 m: 0.30
-20 m: 0.60
-25 m: 0.05
-```
-
-Metric depth là weighted expectation `sum(probability_i * bin_center_i)`. Ground truth là bin chứa depth LiDAR. Cross entropy **chỉ tính tại pixel có LiDAR mask**; repo không tự nội suy thành dense pseudo-GT.
-
-Multi-task loss:
-
-```text
-L_total = L_detection + lambda_depth * L_sparse_depth
-```
-
-Depth ở đây là `z_camera` (độ sâu theo optical axis), không phải Euclidean range 3D tới sensor.
-
-## Object distance và near-VRU
-
-Lấy toàn bbox dễ trộn background. `estimate_box_distance` lấy median trong vùng lower-middle: 50% giữa theo chiều ngang và 40% dưới theo chiều dọc; nếu vùng không hợp lệ thì fallback center pixel.
-
-Threshold demo trong config:
-
-```text
-VRU distance <= 10 m          -> CRITICAL
-10 m < VRU distance <= 20 m   -> NEAR
-VRU distance > 20 m           -> FAR
-```
-
-Vehicle vẫn có distance nhưng không nhận near-VRU status. Quy tắc này chỉ để minh họa workflow, không có uncertainty, temporal filtering, braking model hay safety validation.
-
-## Cài đặt và chạy
-
-Trong PowerShell, từ root repository:
-
-```powershell
-python -m pip install -r requirements.txt
-
-python scripts/inspect_navsim_classes.py
-python scripts/build_index.py
-python scripts/visualize_projected_gt.py --sample-index 0
-python scripts/visualize_sparse_depth.py --sample-index 0
-
-python scripts/test_dataloader.py --batch-size 2
-python scripts/test_dataloader.py --batch-size 1 --with-depth
-
-python scripts/train_detection.py --max-samples 50 --epochs 1 --batch-size 2 --device auto
-python scripts/infer_detection.py --sample-index 0
-
-python scripts/train_multitask.py --max-samples 50 --epochs 1 --batch-size 2 `
-  --load-phase1 checkpoints/phase1_detector.pt --device auto
-python scripts/demo.py --sample-index 0
-
-python -m pytest -q
-```
-
-Smoke checkpoint đi kèm workspace chỉ được overfit vài update trên một frame để chứng minh backward/save/load chạy. Nó không đại diện accuracy. Với checkpoint chưa train đủ, có thể hạ threshold chỉ để debug decode, nhưng kết quả không nên được diễn giải như detector tốt:
-
-```powershell
-python scripts/infer_detection.py --sample-index 0 --score-threshold 0.01 --top-k 20
-python scripts/demo.py --sample-index 0 --score-threshold 0.01 --top-k 20
-```
-
-`num_workers=0` là mặc định an toàn cho Windows smoke test. Có thể tăng sau khi pipeline ổn định.
-
 ## Cấu trúc code
 
 ```text
-configs/                 taxonomy, resolution, loss/risk thresholds
-src/data/                projection, PCD/depth, targets, Dataset
-src/model/               ResNet34, FPN, detection/depth heads, full model
-src/losses/              detection and sparse depth loss
-src/utils/               decode, drawing, distance/risk
-scripts/                 inspect/build/visualize/train/infer/demo
-tests/                   real-data, tensor/loss and end-to-end tests
-artifacts/               small index and rendered sanity/demo images
-checkpoints/             generated Phase 1/2 weights
+configs/       model, loss, taxonomy và risk thresholds
+src/data/      projection, targets, Dataset và sparse depth
+src/model/     ResNet34, FPN, detection head và depth head
+src/losses/    detection loss và depth loss
+src/utils/     decode, distance và visualization
+scripts/       inspect, visualization, training và inference
+tests/         geometry, tensor shape, loss và end-to-end
+artifacts/     input, visualization và JSON outputs
 ```
 
-## Relation to METEOR
+## Lưu ý
 
-Project lấy cảm hứng ở mức ý tưởng từ image backbone, depth distribution và detection workflow của METEOR. Đây **không phải full METEOR**. Repo cố ý không có:
-
-- 8-camera fusion;
-- depth-gated IPM;
-- BEV;
-- 3D BEV detection;
-- occupancy, motion prediction hoặc planning stack.
-
-Code raw PyTorch và một stride-4 head được chọn để người học nhìn thấy từng tensor/loss thay vì bị framework lớn che khuất.
-
-## Possible Phase 3 (chỉ conceptual)
-
-Một phase sau có thể dùng 8 camera với shared backbone, dự đoán depth distribution, depth-gated IPM để lift feature vào BEV, rồi Vehicle/VRU 3D detector. Phase đó cần calibration/visibility/occlusion evaluation kỹ hơn và không được implement trong repository này.
-
-## Known limitations
-
-- Taxonomy phản ánh subset local quan sát được; class mới phải inspect rồi map có chủ đích.
-- 2D GT là rectangle bao quanh các corner 3D nhìn thấy, không phải amodal/instance mask 2D được gán tay.
-- Object cắt near-plane dùng các corner phía trước, đủ cho demo nhưng không phải polygon clipping đầy đủ.
-- Không augmentation, validation split, metric mAP/depth, scheduler, mixed precision hay distributed training.
-- Sparse LiDAR có occlusion/misalignment theo thời gian và không supervise mọi pixel.
-- Distance lấy từ predicted camera-Z depth; chưa hiệu chỉnh uncertainty và không phải safety distance.
-- Checkpoint smoke vài iteration không có giá trị accuracy/generalization.
+- Checkpoint hiện tại chỉ được train vài iteration để kiểm tra pipeline.
+- Confidence và bbox trong demo chưa đại diện accuracy thực tế.
+- Depth là `camera-Z`, không phải Euclidean range 3D từ sensor.
+- Không có multi-camera fusion, BEV, 3D detector, occupancy hoặc planning.
+- Logic `CRITICAL / NEAR / FAR` chỉ để minh họa, không phải safety logic.
