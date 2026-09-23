@@ -40,6 +40,10 @@ Mỗi phần tử trong `demo_000.json` có dạng:
 {
   "class": "VRU",
   "bbox": [230.73, 242.1, 235.85, 247.78],
+  "center": [233.29, 244.94],
+  "width": 5.12,
+  "height": 5.68,
+  "corners": [[230.73, 242.1], [235.85, 242.1], [235.85, 247.78], [230.73, 247.78]],
   "confidence": 0.0276,
   "distance_m": 39.08,
   "status": "FAR"

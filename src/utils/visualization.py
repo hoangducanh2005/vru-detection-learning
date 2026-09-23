@@ -11,6 +11,27 @@ CLASS_NAMES = {0: "VEHICLE", 1: "VRU"}
 CLASS_COLORS = {0: (40, 180, 40), 1: (40, 40, 230)}  # OpenCV dùng thứ tự BGR.
 
 
+def bbox_geometry(box: npt.NDArray[np.floating] | list[float]) -> dict[str, object]:
+    """Đổi ``[x1,y1,x2,y2]`` thành tâm, kích thước và 4 góc rõ ràng.
+
+    Bbox trong tensor đã đủ để vẽ hình chữ nhật, nhưng JSON nên lưu explicit
+    corners để người đọc không phải tự suy ra thứ tự các điểm.
+    """
+
+    x1, y1, x2, y2 = map(float, box)
+    return {
+        "center": [round((x1 + x2) / 2.0, 2), round((y1 + y2) / 2.0, 2)],
+        "width": round(x2 - x1, 2),
+        "height": round(y2 - y1, 2),
+        "corners": [
+            [round(x1, 2), round(y1, 2)],  # top-left
+            [round(x2, 2), round(y1, 2)],  # top-right
+            [round(x2, 2), round(y2, 2)],  # bottom-right
+            [round(x1, 2), round(y2, 2)],  # bottom-left
+        ],
+    }
+
+
 def draw_boxes(
     image_bgr: npt.NDArray[np.uint8],
     boxes: npt.NDArray[np.floating],
@@ -24,6 +45,10 @@ def draw_boxes(
         x1, y1, x2, y2 = map(int, np.round(box))
         color = CLASS_COLORS[label]
         cv2.rectangle(output, (x1, y1), (x2, y2), color, 2, cv2.LINE_AA)
+        # Vẽ cả tâm và bốn góc để nhìn rõ bbox ngay cả khi kích thước nhỏ.
+        for corner_x, corner_y in ((x1, y1), (x2, y1), (x2, y2), (x1, y2)):
+            cv2.circle(output, (corner_x, corner_y), 3, color, -1, cv2.LINE_AA)
+        cv2.circle(output, ((x1 + x2) // 2, (y1 + y2) // 2), 3, (255, 255, 255), -1, cv2.LINE_AA)
         text = texts[index] if texts is not None else CLASS_NAMES[label]
         cv2.putText(output, text, (x1, max(16, y1 - 5)), cv2.FONT_HERSHEY_SIMPLEX, 0.55, color, 2, cv2.LINE_AA)
     return output

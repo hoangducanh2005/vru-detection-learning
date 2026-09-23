@@ -17,7 +17,7 @@ from src.model.depth_head import depth_expectation
 from src.model.vru_model import VruModel
 from src.utils.decode import decode_detections
 from src.utils.distance import estimate_box_distance, vru_risk
-from src.utils.visualization import CLASS_NAMES, draw_boxes
+from src.utils.visualization import CLASS_NAMES, bbox_geometry, draw_boxes
 
 
 def main() -> None:
@@ -67,6 +67,7 @@ def main() -> None:
         record = {
             "class": CLASS_NAMES[label],
             "bbox": [round(float(value), 2) for value in box],
+            **bbox_geometry(box.detach().cpu().numpy()),
             "confidence": round(float(score), 4),
             "distance_m": round(distance, 2),
         }

@@ -15,7 +15,7 @@ from _common import choose_device, load_config, load_model_state, resized_bgr
 from src.data.navsim_vru_dataset import NavsimVruDataset
 from src.model.vru_model import VruModel
 from src.utils.decode import decode_detections
-from src.utils.visualization import CLASS_NAMES, draw_boxes
+from src.utils.visualization import CLASS_NAMES, bbox_geometry, draw_boxes
 
 
 def main() -> None:
@@ -61,6 +61,7 @@ def main() -> None:
         {
             "class": CLASS_NAMES[int(label)],
             "bbox": [round(float(value), 2) for value in box],
+            **bbox_geometry(box),
             "confidence": round(float(score), 4),
         }
         for box, score, label in zip(boxes, scores, labels)
